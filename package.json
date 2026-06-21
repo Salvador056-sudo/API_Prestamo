@@ -16,5 +16,13 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "pg": "^8.22.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Salvador056-sudo/API_Prestamo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Salvador056-sudo/API_Prestamo/issues"
+  },
+  "homepage": "https://github.com/Salvador056-sudo/API_Prestamo#readme"
 }
