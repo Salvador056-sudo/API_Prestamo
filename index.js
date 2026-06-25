@@ -34,20 +34,30 @@ async function obtenerAlumno(alumnoId) {
   }
 }
 
+// Verificar si un autor está activo
+async function verificarAutorActivo(autorId) {
+  try {
+    const response = await axios.get(`http://localhost:6006/api/autores/${autorId}`);
+    return response.data.activo !== false;
+  } catch (err) {
+    console.error(`Error al verificar autor ${autorId}:`, err.message);
+    return false;
+  }
+}
+
 // ============================================
 // CRUD DE PRÉSTAMOS
 // ============================================
 
-// 1. GET - Obtener todos los préstamos (con datos de libro y alumno)
+// 1. GET - Obtener todos los préstamos (ordenados por ID DESC)
 app.get('/api/prestamos', async (req, res) => {
   try {
     const resultado = await pool.query(
-      'SELECT * FROM prestamos ORDER BY fecha_prestamo DESC'
+      'SELECT * FROM prestamos ORDER BY id DESC'
     );
     
     const prestamos = resultado.rows;
     
-    // Para cada préstamo, obtener datos del libro y alumno
     const prestamosCompletos = await Promise.all(
       prestamos.map(async (prestamo) => {
         const libro = await obtenerLibro(prestamo.libro_id);
@@ -72,20 +82,18 @@ app.get('/api/prestamos/alumno/:alumnoId', async (req, res) => {
   try {
     const { alumnoId } = req.params;
     
-    // Verificar que el alumno existe
     const alumno = await obtenerAlumno(alumnoId);
     if (!alumno) {
       return res.status(404).json({ error: 'Alumno no encontrado' });
     }
     
     const resultado = await pool.query(
-      'SELECT * FROM prestamos WHERE alumno_id = $1 ORDER BY fecha_prestamo DESC',
+      'SELECT * FROM prestamos WHERE alumno_id = $1 ORDER BY id DESC',
       [alumnoId]
     );
     
     const prestamos = resultado.rows;
     
-    // Obtener datos de los libros
     const prestamosCompletos = await Promise.all(
       prestamos.map(async (prestamo) => {
         const libro = await obtenerLibro(prestamo.libro_id);
@@ -113,23 +121,31 @@ app.post('/api/prestamos', async (req, res) => {
       });
     }
     
-    // Verificar que el libro existe y tiene disponibilidad
     const libro = await obtenerLibro(libro_id);
     if (!libro) {
       return res.status(404).json({ error: 'Libro no encontrado' });
+    }
+    
+    if (libro.activo === false) {
+      return res.status(400).json({ error: 'Este libro está desactivado' });
+    }
+    
+    const autorActivo = await verificarAutorActivo(libro.autor_id);
+    if (!autorActivo) {
+      return res.status(400).json({ 
+        error: 'No se puede prestar este libro porque su autor está inactivo' 
+      });
     }
     
     if (libro.cantidad_disponible <= 0) {
       return res.status(400).json({ error: 'No hay ejemplares disponibles de este libro' });
     }
     
-    // Verificar que el alumno existe
     const alumno = await obtenerAlumno(alumno_id);
     if (!alumno) {
       return res.status(404).json({ error: 'Alumno no encontrado' });
     }
     
-    // Crear el préstamo
     const nuevo = await pool.query(
       `INSERT INTO prestamos (libro_id, alumno_id, fecha_prestamo, fecha_devolucion, estado) 
        VALUES ($1, $2, CURRENT_DATE, $3, 'activo') 
@@ -137,7 +153,6 @@ app.post('/api/prestamos', async (req, res) => {
       [libro_id, alumno_id, fecha_devolucion]
     );
     
-    // Actualizar la cantidad disponible del libro (vía API)
     await axios.put(`http://localhost:6005/api/libros/${libro_id}`, {
       titulo: libro.titulo,
       autor_id: libro.autor_id,
@@ -161,7 +176,6 @@ app.put('/api/prestamos/:id/devolver', async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Verificar que el préstamo existe y está activo
     const prestamoCheck = await pool.query(
       'SELECT * FROM prestamos WHERE id = $1 AND estado = $2',
       [id, 'activo']
@@ -173,7 +187,6 @@ app.put('/api/prestamos/:id/devolver', async (req, res) => {
     
     const prestamo = prestamoCheck.rows[0];
     
-    // Registrar la devolución
     const resultado = await pool.query(
       `UPDATE prestamos 
        SET estado = 'devuelto', fecha_regreso = CURRENT_DATE
@@ -182,7 +195,6 @@ app.put('/api/prestamos/:id/devolver', async (req, res) => {
       [id]
     );
     
-    // Actualizar la cantidad disponible del libro (vía API)
     const libro = await obtenerLibro(prestamo.libro_id);
     if (libro) {
       await axios.put(`http://localhost:6005/api/libros/${prestamo.libro_id}`, {
@@ -215,7 +227,6 @@ app.delete('/api/prestamos/:id', async (req, res) => {
       return res.status(404).json({ error: 'Préstamo activo no encontrado' });
     }
     
-    // Devolver la cantidad disponible (vía API)
     const prestamo = resultado.rows[0];
     const libro = await obtenerLibro(prestamo.libro_id);
     if (libro) {
@@ -233,7 +244,6 @@ app.delete('/api/prestamos/:id', async (req, res) => {
   }
 });
 
-// LISTEN
 const PORT = process.env.PORT || 6009;
 app.listen(PORT, () => {
   console.log(`📋 API Préstamos escuchando en http://localhost:${PORT}`);
